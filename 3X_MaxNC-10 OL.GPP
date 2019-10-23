@@ -1,0 +1,373 @@
+; ------------------------------------------------------------------------------
+; Status               : closed
+; ------------------------------------------------------------------------------
+; customer             : 
+; machine              : 
+; type                 : XYZ machine plane XY
+; control unit         : 
+; SolidCAM             : 2016 SP3 HF2
+; ------------------------------------------------------------------------------
+; specials             : 
+; ------------------------------------------------------------------------------
+; machine_options      :
+; ------------------------------------------------------------------------------
+; job_options          : 
+; ------------------------------------------------------------------------------
+;
+; Rev 1.0 Djurica D.	04.05.2017:
+
+@init_post
+	
+	global string tool_diameter_f ud_r_file_name sZinverted spin_f drill_upper_z_f drill_lower_z_f
+	global numeric ud_save_spin
+	global logical bZinverted ud_first_rapid_move ud_m_feed_flag bFloodCoolant
+	
+	; Non GPPL variables
+	num_user_procs =    1
+	line_labels    = FALSE     ; Jump to N...
+	
+	blknum_f        = '5.0(p)'
+	blknum_gen      = true
+	blknum_exist    = true
+	blknum          = 10
+	blknum_delta    = 10
+	blknum_max      = 32000000
+	
+	global logical bTracePrinted
+	global integer iTraceMode
+	
+	if user_account eq 'Danijel' ;insert you computer name
+		if bTracePrinted eq false
+			input 'trace 0 = no ... trace 5 = all:' iTraceMode
+			trace 'all': iTraceMode
+			bTracePrinted = true
+		endif
+	endif
+	
+endp
+;-------------------
+@usr_codeformat
+	bZinverted		= false
+	
+	if bZinverted eq true
+		sZinverted		= '(*-1)'
+	else
+		sZinverted		= ''
+	endif
+	numeric_def_f   = '5.3'
+	integer_def_f   = '5.0(p)'
+	gcode_f         = '<G>2.0(p)< >'
+	mcode_f         = '<M>2.0(p)< >'
+	spin_f			= '<S>5.0(p)< >'
+	drill_upper_z_f	= '<R>5.3< >'
+	if inch_system eq 0
+		xpos_f          = '<X>5.3< >'
+		ypos_f          = '<Y>5.3< >'
+		zpos_f          = '<Z>5.3'+sZinverted+'< >'
+	else
+		xpos_f          = '<X>5.4< >'
+		ypos_f          = '<Y>5.4< >'
+		zpos_f          = '<Z>5.4'+sZinverted+'< >'
+	endif
+	feed_f          = '<F>4.3(p)< >'
+	tool_diameter_f = '5.3/1'
+endp
+;-------------------
+@start_of_file
+	
+	call @usr_codeformat
+	call @udr_del_file_name_ext
+	
+	{'('program_number')'}
+	{nl'( -- ', ud_r_file_name, ' -- )'}
+	{nl'( -- 'DATE' -- )'}
+	
+endp
+;-------------------
+@start_program
+
+	{nb 'G49 G80'}
+	
+	if inch_system eq 1
+		{' G20'}
+	else
+		{' G21'}
+	endif
+	
+	if rotate_used then
+		gcode = 69
+		{nb gcode}
+	endif
+	
+	if mirror_used then
+		{nb, 'G50.1 X0 Y0'}
+	endif
+	
+endp
+;-------------------
+@end_program
+	call @udr_cooling
+	{nb'M30'}
+endp
+;-------------------
+@relative_mode
+	gcode = 91
+	{nb gcode}
+	skipline = FALSE
+endp
+;-------------------
+@absolute_mode
+	gcode = 90
+	{nb gcode}
+	skipline = FALSE
+endp
+;-------------------
+@machine_plane
+	if machine_plane eq XY
+		gcode = 17
+	else
+		print 'Machine Plane XY (G17) only possible. Please change settings in coord.sys. manager!'
+	endif
+	{nb gcode'G94'}
+endp
+
+;-------------------
+@call_proc
+	{nb'L'label}
+	{' ('upper(message), ')'}
+endp
+
+;-------------------
+@proc
+	{nl}
+	{nb'G98 L'label}
+endp
+;-------------------
+@end_proc
+	{nb'G98 L0'}
+endp
+;----------------
+@def_tool
+	if tool_message eq ''
+		tool_message = tool_user_type
+	endif
+	{nb,'(T'tool_number,' - 'upper(tool_message)' - D'(tool_offset*2):tool_diameter_f')'}
+	
+endp
+;-------------------
+@rapid_move
+	
+	{nb}
+	gcode = 0
+	
+	if ud_first_rapid_move eq true
+		change(xpos) = true
+		change(ypos) = true
+		change(zpos) = false
+	endif
+	
+	{gcode[xpos][ypos][zpos]}
+	
+	if ud_first_rapid_move eq true
+		call @udr_cooling
+	endif
+	
+	if ud_first_rapid_move eq true
+		change(xpos) = false
+		change(ypos) = false
+		change(zpos) = true
+		ud_first_rapid_move = false
+		call @rapid_move
+	endif
+	
+endp
+;-------------------
+@line
+	
+	{nb}
+	gcode = 1
+	{gcode[xpos][ypos][zpos][feed]}
+
+endp
+;-------------------
+@arc
+	
+	gcode = 2+arc_direction
+	{nb gcode[xpos][ypos][zpos]' I'xcenter_rel, ' J'ycenter_rel[feed]}
+	
+endp
+;-------------------
+@compensation
+	
+	gcode = 42-side
+	{nb gcode}
+	skipline = FALSE
+	
+endp
+;-------------------
+@delay
+	
+	gcode = 4
+	{nb gcode ' F'delay_period:integer_def_f}
+	
+endp
+;-------------------
+@home_number
+	
+	{nb,'(NULLPUNKT 'home_number')'}
+	
+endp
+;-------------------
+@change_tool
+	
+	if tool_message eq ''
+		tool_message = tool_user_type
+	endif
+	{nb, '('upper(tool_message)')'}
+	bFloodCoolant = false
+	{nb, 'T'tool_number' M6'}
+	{nb}
+	call @start_tool
+	
+endp
+;-------------------
+@drill
+	call @rapid_move      
+    if drill_type eq G81 then
+        gcode = 81
+    endif
+    if drill_type eq G82 then
+        gcode = 82
+    endif
+    if drill_type eq G83 then
+        gcode = 83
+    endif
+    if drill_type eq G73 then
+        gcode = 73
+    endif
+    if drill_type eq G84 then
+        gcode = 84
+    endif
+    if drill_type eq G74 then
+        gcode = 74
+    endif
+    if drill_type eq G76 then
+       gcode = 76
+    endif
+    if drill_type eq G85 then
+        gcode = 85
+    endif
+	if down_step eq 0
+		down_step=(drill_depth-safety)
+	endif
+    if drill_type eq G74 or drill_type eq G84 then
+		mcode = 29
+		{nb spin feed mcode}
+    else
+		{feed}
+    endif
+    {nb gcode drill_upper_z drill_lower_z:zpos_f}
+    if drill_type eq G82
+       {' P'P_Dwell}
+    endif
+    if drill_type eq G83 or drill_type eq G73 then
+       {' Q'down_step} 
+    endif
+    if drill_type eq G76 then
+       {' Q'Q_Shift_at_bottom}
+    endif
+endp
+;-------------------
+@drill_point
+	
+	if !first_drill
+		{nb colrel(4) [xpos][ypos][zpos]}
+	endif
+	
+endp
+;-------------------
+@end_drill
+
+	gcode = 80
+	{nb gcode} 
+	
+endp
+;-------------------
+@mirror
+
+	if mirror_type eq MIRROR_OFF then
+		{nb, 'G50.1 X0 Y0'}
+	else
+		{nb, 'G51.1 '}
+		if mirror_type eq MIRROR_X then
+			{'X1 Y0'}
+		endif
+		if mirror_type eq MIRROR_Y then
+			{'X0 Y1'}
+		endif
+		if mirror_type eq MIRROR_XY then
+			{'X1 Y1'}
+		endif
+	endif
+	
+endp
+;-------------------
+@start_of_job
+	
+	{nb,'(',upper(job_name)')'}
+	if msg ne '' then
+		{nb,'(',upper(msg)')'}
+	endif
+	ud_first_rapid_move = true
+	
+endp
+;-------------------
+@start_tool
+	
+	mcode = 3+spin_direction
+	{spin mcode}
+	ud_save_spin = spin
+	
+endp
+
+;-------------------
+@m_feed_spin
+	
+	ud_m_feed_flag = true
+	
+	if spin ne ud_save_spin
+		skipline = true
+		{nb}
+		call @start_tool
+	endif
+	
+endp
+
+;----------------
+@udr_del_file_name_ext
+	
+	local integer len
+	len =strlen(g_file_name)
+	len =len-3
+	ud_r_file_name = left(g_file_name,len)
+	
+endp
+;-----------------
+@udr_cooling
+	
+	if flood_coolant eq 1 or flood_coolant eq 2
+		if bFloodCoolant eq true
+			if flood_coolant eq 2
+				{'M9'}
+				bFloodCoolant = false
+			endif
+		else
+			if flood_coolant eq 1
+				{'M8'}
+				bFloodCoolant = true
+			endif
+		endif
+	endif
+	
+endp
+;-------------------
